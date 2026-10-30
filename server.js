@@ -5,6 +5,21 @@ const crypto = require('crypto');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Log every incoming request without exposing payment data.
+app.use((req, res, next) => {
+  console.log(
+    `[INCOMING REQUEST] ${req.method} ${req.originalUrl}`
+  );
+
+  res.on('finish', () => {
+    console.log(
+      `[RESPONSE] ${req.method} ${req.originalUrl} - ${res.statusCode}`
+    );
+  });
+
+  next();
+});
+
 // --------------------------------------------------
 // 1. HEALTH CHECK
 // --------------------------------------------------
