@@ -13,9 +13,7 @@ const EXPECTED_EVENT = 'PAYMENT_FORM_ORDER_WEBHOOK';
 // --------------------------------------------------
 
 app.use((req, res, next) => {
-  console.log(
-    `[INCOMING REQUEST] ${req.method} ${req.path}`
-  );
+  console.log(`[INCOMING REQUEST] ${req.method} ${req.path}`);
 
   res.on('finish', () => {
     console.log(
@@ -31,15 +29,10 @@ app.use((req, res, next) => {
 // --------------------------------------------------
 
 app.get('/', (req, res) => {
-  res.status(200).send(
-    'Cashfree Student Bridge is running.'
-  );
+  res.status(200).send('Cashfree Student Bridge is running.');
 });
 
-// Cashfree or a monitoring service may check the endpoint with GET.
 app.get(WEBHOOK_PATH, (req, res) => {
-  console.log('[HEALTH CHECK] Payment Form endpoint is reachable.');
-
   res.status(200).send(
     'Cashfree Payment Form webhook endpoint is ready.'
   );
@@ -83,11 +76,11 @@ function verifyCashfreeSignature(
 }
 
 // --------------------------------------------------
-// 4. HELPER FUNCTIONS
+// 4. FIELD HELPERS
 // --------------------------------------------------
 
 function normalize(value) {
-  return String(value || '')
+  return String(value ?? '')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
@@ -103,10 +96,11 @@ function getCustomField(fields, ...labels) {
 
   for (const field of fields) {
     const fieldLabel = normalize(
-      field.title ||
-      field.label ||
-      field.field_name ||
-      field.name
+      field.title ??
+      field.label ??
+      field.field_name ??
+      field.name ??
+      ''
     );
 
     if (wantedLabels.includes(fieldLabel)) {
@@ -133,17 +127,10 @@ app.post(
     limit: '1mb'
   }),
   async (req, res) => {
-
     try {
-      // ----------------------------------------------
-      // A. Validate request body
-      // ----------------------------------------------
+      // A. Validate raw request body
 
       if (!Buffer.isBuffer(req.body)) {
-        console.error(
-          '[ERROR] Request body is not raw JSON.'
-        );
-
         return res.status(400).send(
           'Invalid webhook request body.'
         );
@@ -151,9 +138,7 @@ app.post(
 
       const rawBody = req.body.toString('utf8');
 
-      // ----------------------------------------------
       // B. Read Cashfree signature headers
-      // ----------------------------------------------
 
       const timestamp = req.get('x-webhook-timestamp');
       const signature = req.get('x-webhook-signature');
@@ -172,9 +157,7 @@ app.post(
         );
       }
 
-      // ----------------------------------------------
-      // C. Verify the Cashfree signature
-      // ----------------------------------------------
+      // C. Verify signature
 
       const validSignature = verifyCashfreeSignature(
         timestamp,
@@ -185,7 +168,7 @@ app.post(
 
       if (!validSignature) {
         console.error(
-          '[SIGNATURE ERROR] Cashfree signature verification failed.'
+          '[SIGNATURE ERROR] Verification failed.'
         );
 
         return res.status(401).send(
@@ -193,21 +176,15 @@ app.post(
         );
       }
 
-      console.log(
-        '[SIGNATURE SUCCESS] Cashfree signature verified.'
-      );
+      console.log('[SIGNATURE SUCCESS] Verified.');
 
-      // ----------------------------------------------
-      // D. Parse verified webhook payload
-      // ----------------------------------------------
+      // D. Parse verified event
 
       let event;
 
       try {
         event = JSON.parse(rawBody);
       } catch (error) {
-        console.error('[ERROR] Invalid JSON webhook payload.');
-
         return res.status(400).send(
           'Invalid JSON payload.'
         );
@@ -218,9 +195,7 @@ app.post(
       const order = data.order || {};
       const payment = data.payment || {};
 
-      // Log identifiers and status only.
-      // Never log student names, phone numbers or emails.
-      console.log('[CASHFREE EVENT DETAILS]', {
+      console.log('[CASHFREE EVENT]', {
         eventType: event.type || 'Missing',
         formId: form.form_id || '',
         cashfreeFormId: form.cf_form_id || '',
@@ -229,15 +204,10 @@ app.post(
         paymentStatus: payment.payment_status || ''
       });
 
-      // ----------------------------------------------
       // E. Check event type
-      // ----------------------------------------------
 
       if (event.type !== EXPECTED_EVENT) {
-        console.log(
-          '[IGNORED] Unexpected Cashfree event:',
-          event.type || 'Missing'
-        );
+        console.log('[IGNORED] Unexpected event.');
 
         return res.status(200).send(
           'Event ignored.'
@@ -245,18 +215,12 @@ app.post(
       }
 
       if (!order.order_id) {
-        console.error(
-          '[ERROR] Cashfree Order ID is missing.'
-        );
-
         return res.status(400).send(
-          'Order information missing.'
+          'Cashfree Order ID missing.'
         );
       }
 
-      // ----------------------------------------------
-      // F. Check production form ID
-      // ----------------------------------------------
+      // F. Check the configured Cashfree form ID
 
       const allowedFormId = String(
         process.env.CASHFREE_FORM_ID || ''
@@ -275,26 +239,18 @@ app.post(
         )
         .map(value => String(value).trim());
 
-      if (allowedFormId) {
-        console.log('[FORM ID CHECK]', {
-          configuredFormId: allowedFormId,
-          receivedFormIds: receivedFormIds
-        });
+      if (
+        allowedFormId &&
+        !receivedFormIds.includes(allowedFormId)
+      ) {
+        console.warn('[IGNORED] Form ID mismatch.');
 
-        if (!receivedFormIds.includes(allowedFormId)) {
-          console.warn(
-            '[IGNORED] Cashfree Form ID mismatch.'
-          );
-
-          return res.status(200).send(
-            'Different form ignored.'
-          );
-        }
+        return res.status(200).send(
+          'Different form ignored.'
+        );
       }
 
-      // ----------------------------------------------
-      // G. Check successful payment
-      // ----------------------------------------------
+      // G. Only process successful payments
 
       const orderStatus = String(
         order.order_status || ''
@@ -309,23 +265,14 @@ app.post(
         paymentStatus === 'SUCCESS';
 
       if (!paymentSuccessful) {
-        console.log('[IGNORED] Payment is not successful.', {
-          orderStatus: orderStatus || 'Missing',
-          paymentStatus: paymentStatus || 'Missing'
-        });
+        console.log('[IGNORED] Payment not successful.');
 
         return res.status(200).send(
           'Payment not successful.'
         );
       }
 
-      console.log(
-        '[PAYMENT SUCCESS] Verified successful payment.'
-      );
-
-      // ----------------------------------------------
-      // H. Extract customer details and custom fields
-      // ----------------------------------------------
+      // H. Extract customer information
 
       const customer =
         order.customer_details ||
@@ -336,12 +283,14 @@ app.post(
         customer.customer_fields ||
         order.customer_fields ||
         data.customer_fields ||
+        form.customer_fields ||
         [];
 
-      // Log field names only, never their values.
+      // Log field labels only, never customer values.
+
       if (Array.isArray(fields)) {
         console.log(
-          '[CUSTOM FIELD LABELS]',
+          '[FORM FIELD LABELS]',
           fields.map(field =>
             field.title ||
             field.label ||
@@ -350,60 +299,54 @@ app.post(
             'Unknown'
           )
         );
-      } else {
-        console.log(
-          '[CUSTOM FIELD LABELS] No custom-field array found.'
-        );
       }
 
-      const amount = Number(
-        order.order_amount ??
-        payment.payment_amount ??
-        0
-      );
+      // I. Match the six actual Cashfree form fields
 
       const student = {
-        name: String(
-          customer.customer_name || ''
+        // Customer details
+        phone: String(
+          customer.customer_phone || ''
         ).trim(),
 
         email: String(
           customer.customer_email || ''
         ).trim(),
 
-        phone: String(
-          customer.customer_phone || ''
+        name: String(
+          customer.customer_name || ''
         ).trim(),
 
+        // Custom form fields
         domain: getCustomField(
           fields,
-          'Domain Name',
-          'Domain'
+          'DOMAIN',
+          'Domain',
+          'Domain Name'
         ),
 
         empCode: getCustomField(
           fields,
+          'EM CODE',
           'Emp Code',
           'Employee Code',
           'Employee ID'
         ),
 
-        college: getCustomField(
+        startDate: getCustomField(
           fields,
-          'College Name',
-          'College'
+          'START DATE',
+          'Start Date'
         ),
 
-        paymentId: String(
-          payment.cf_payment_id ||
-          payment.payment_id ||
-          order.transaction_id ||
-          ''
-        ),
-
+        // Payment details
         orderId: String(order.order_id),
 
-        amount: amount,
+        amount: Number(
+          order.order_amount ??
+          payment.payment_amount ??
+          0
+        ),
 
         paymentStatus: 'PAID',
 
@@ -412,44 +355,47 @@ app.post(
           new Date().toISOString()
       };
 
-      if (
-        !student.orderId ||
-        !Number.isFinite(student.amount) ||
-        student.amount <= 0
-      ) {
-        console.error(
-          '[ERROR] Invalid order ID or payment amount.'
-        );
-
-        return res.status(400).send(
-          'Invalid payment details.'
-        );
-      }
+      // J. Validate all required form fields
 
       const missingFields = [];
 
-      if (!student.name) missingFields.push('Name');
-      if (!student.email) missingFields.push('Email');
       if (!student.phone) missingFields.push('Phone Number');
-      if (!student.domain) missingFields.push('Domain Name');
-      if (!student.empCode) missingFields.push('Emp Code');
-      if (!student.college) missingFields.push('College Name');
-      if (!student.paymentId) missingFields.push('Payment ID');
+      if (!student.email) missingFields.push('Email ID');
+      if (!student.name) missingFields.push('Name');
+      if (!student.domain) missingFields.push('DOMAIN');
+      if (!student.empCode) missingFields.push('EM CODE');
+      if (!student.startDate) missingFields.push('START DATE');
 
       console.log('[STUDENT FIELD CHECK]', {
-        namePresent: Boolean(student.name),
-        emailPresent: Boolean(student.email),
         phonePresent: Boolean(student.phone),
+        emailPresent: Boolean(student.email),
+        namePresent: Boolean(student.name),
         domainPresent: Boolean(student.domain),
         empCodePresent: Boolean(student.empCode),
-        collegePresent: Boolean(student.college),
-        paymentIdPresent: Boolean(student.paymentId),
-        missingFields: missingFields
+        startDatePresent: Boolean(student.startDate),
+        missingFields
       });
 
-      // ----------------------------------------------
-      // I. Forward verified details to Apps Script
-      // ----------------------------------------------
+      if (missingFields.length > 0) {
+        console.error(
+          '[ERROR] Required form fields missing.'
+        );
+
+        return res.status(400).send(
+          'Required form fields missing.'
+        );
+      }
+
+      if (
+        !Number.isFinite(student.amount) ||
+        student.amount <= 0
+      ) {
+        return res.status(400).send(
+          'Invalid payment amount.'
+        );
+      }
+
+      // K. Forward verified payment to Google Apps Script
 
       const gasUrl = process.env.GAS_WEB_APP_URL;
       const bridgeToken = process.env.CF_BRIDGE_TOKEN;
@@ -466,16 +412,13 @@ app.post(
 
       const forwardResponse = await fetch(gasUrl, {
         method: 'POST',
-
         headers: {
           'Content-Type': 'application/json'
         },
-
         body: JSON.stringify({
-          bridgeToken: bridgeToken,
-          student: student
+          bridgeToken,
+          student
         }),
-
         redirect: 'follow'
       });
 
@@ -487,7 +430,7 @@ app.post(
         result = JSON.parse(responseText);
       } catch (error) {
         console.error(
-          '[APPS SCRIPT ERROR] Response was not JSON.'
+          '[APPS SCRIPT ERROR] Invalid JSON response.'
         );
 
         throw new Error(
@@ -508,22 +451,20 @@ app.post(
       ) {
         throw new Error(
           result.message ||
-          'Apps Script could not save the student.'
+          'Google Sheets save failed.'
         );
       }
 
-      // ----------------------------------------------
-      // J. Final response
-      // ----------------------------------------------
+      // L. Return success to Cashfree
 
       if (result.duplicate) {
         console.log(
-          '[COMPLETED] Duplicate order was safely ignored:',
+          '[COMPLETED] Duplicate order ignored:',
           student.orderId
         );
       } else {
         console.log(
-          '[COMPLETED] New student record saved:',
+          '[COMPLETED] Student payment saved:',
           student.orderId
         );
       }
@@ -538,7 +479,6 @@ app.post(
         error.message
       );
 
-      // Cashfree can retry delivery after a non-2xx response.
       return res.status(500).send(
         'Temporary webhook processing error.'
       );
